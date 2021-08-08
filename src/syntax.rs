@@ -534,9 +534,6 @@ impl MatchKind {
 pub struct MatchedPos {
     pub kind: MatchKind,
     pub pos: Vec<SingleLineSpan>,
-    // TODO: this is confusing: the previous syntax node with a match
-    // may be on the current line or a previous one.
-    pub prev_opposite_pos: Vec<SingleLineSpan>,
 }
 
 fn split_comment_words(
@@ -544,7 +541,6 @@ fn split_comment_words(
     pos: &[SingleLineSpan],
     opposite_content: &str,
     opposite_pos: &[SingleLineSpan],
-    prev_opposite_pos: &[SingleLineSpan],
 ) -> Vec<MatchedPos> {
     // TODO: also split on whitespace, so "// (foo)" splits before "(".
 
@@ -574,7 +570,6 @@ fn split_comment_words(
                         offset,
                         offset + word.len(),
                     ),
-                    prev_opposite_pos: prev_opposite_pos.to_vec(),
                 });
                 offset += word.len();
             }
@@ -593,7 +588,6 @@ fn split_comment_words(
                         opposite_pos: opposite_word_pos,
                     },
                     pos: word_pos,
-                    prev_opposite_pos: prev_opposite_pos.to_vec(),
                 });
                 offset += word.len();
                 opposite_offset += opposite_word.len();
@@ -609,11 +603,7 @@ fn split_comment_words(
 }
 
 impl MatchedPos {
-    fn new(
-        ck: ChangeKind,
-        pos: Vec<SingleLineSpan>,
-        prev_opposite_pos: Vec<SingleLineSpan>,
-    ) -> Vec<Self> {
+    fn new(ck: ChangeKind, pos: Vec<SingleLineSpan>) -> Vec<Self> {
         let kind = match ck {
             ReplacedComment(this, opposite) => {
                 let this_content = match this {
@@ -627,13 +617,7 @@ impl MatchedPos {
                     } => (content, position),
                 };
 
-                return split_comment_words(
-                    this_content,
-                    &pos,
-                    opposite_content,
-                    opposite_pos,
-                    &prev_opposite_pos,
-                );
+                return split_comment_words(this_content, &pos, opposite_content, opposite_pos);
             }
             Unchanged(opposite) => {
                 // TODO: is open_position the best position for
@@ -648,11 +632,7 @@ impl MatchedPos {
             Novel => MatchKind::Novel,
         };
 
-        vec![Self {
-            kind,
-            pos,
-            prev_opposite_pos,
-        }]
+        vec![Self { kind, pos }]
     }
 }
 
@@ -688,18 +668,7 @@ pub fn change_positions<'a>(
     let opposite_nl_pos = NewlinePositions::from(opposite_src);
 
     let mut positions = Vec::new();
-    let mut prev_unchanged = vec![SingleLineSpan {
-        line: 0.into(),
-        start_col: 0,
-        end_col: 0,
-    }];
-    change_positions_(
-        &nl_pos,
-        &opposite_nl_pos,
-        nodes,
-        &mut prev_unchanged,
-        &mut positions,
-    );
+    change_positions_(&nl_pos, &opposite_nl_pos, nodes, &mut positions);
     positions
 }
 
@@ -707,7 +676,6 @@ fn change_positions_<'a>(
     nl_pos: &NewlinePositions,
     opposite_nl_pos: &NewlinePositions,
     nodes: &[&Syntax<'a>],
-    prev_opposite_pos: &mut Vec<SingleLineSpan>,
     positions: &mut Vec<MatchedPos>,
 ) {
     for node in nodes {
@@ -724,73 +692,18 @@ fn change_positions_<'a>(
                     .get()
                     .unwrap_or_else(|| panic!("Should have changes set in all nodes: {:#?}", node));
 
-                if let Unchanged(opposite_node) = change {
-                    match opposite_node {
-                        List {
-                            open_position: opposite_open_pos,
-                            ..
-                        } => {
-                            *prev_opposite_pos = opposite_open_pos.clone();
-                        }
-                        Atom { .. } => unreachable!(),
-                    }
-                }
+                positions.extend(MatchedPos::new(change, open_position.clone()));
 
-                positions.extend(MatchedPos::new(
-                    change,
-                    open_position.clone(),
-                    prev_opposite_pos.clone(),
-                ));
+                change_positions_(nl_pos, opposite_nl_pos, children, positions);
 
-                change_positions_(
-                    nl_pos,
-                    opposite_nl_pos,
-                    children,
-                    prev_opposite_pos,
-                    positions,
-                );
-
-                if let Unchanged(opposite_node) = change {
-                    match opposite_node {
-                        List {
-                            close_position: opposite_close_pos,
-                            ..
-                        } => {
-                            *prev_opposite_pos = opposite_close_pos.clone();
-                        }
-                        Atom { .. } => unreachable!(),
-                    }
-                }
-                positions.extend(MatchedPos::new(
-                    change,
-                    close_position.clone(),
-                    prev_opposite_pos.clone(),
-                ));
+                positions.extend(MatchedPos::new(change, close_position.clone()));
             }
             Atom { info, position, .. } => {
                 let change = info
                     .change
                     .get()
                     .unwrap_or_else(|| panic!("Should have changes set in all nodes: {:#?}", node));
-                if let Unchanged(opposite_node) = change {
-                    match opposite_node {
-                        List { .. } => {
-                            dbg!(node, opposite_node);
-                            unreachable!();
-                        }
-                        Atom {
-                            position: opposite_position,
-                            ..
-                        } => {
-                            *prev_opposite_pos = opposite_position.clone();
-                        }
-                    }
-                }
-                positions.extend(MatchedPos::new(
-                    change,
-                    position.clone(),
-                    prev_opposite_pos.clone(),
-                ));
+                positions.extend(MatchedPos::new(change, position.clone()));
             }
         }
     }
@@ -1101,34 +1014,6 @@ mod tests {
         assert_eq!(
             aligned_lines_(&lhs_lines, &rhs_lines, &line_matches),
             vec![(Some(0.into()), Some(0.into()))]
-        );
-    }
-
-    /// Ensure that we assign prev_opposite_pos even if the change is on the first node.
-    #[test]
-    fn test_prev_opposite_pos_first_node() {
-        let arena = Arena::new();
-
-        let atom = Syntax::new_atom(
-            &arena,
-            vec![SingleLineSpan {
-                line: 0.into(),
-                start_col: 2,
-                end_col: 3,
-            }],
-            "foo",
-        );
-        atom.set_change(ChangeKind::Novel);
-        let nodes: Vec<&Syntax> = vec![atom];
-
-        let positions = change_positions("irrelevant", "also irrelevant", &nodes);
-        assert_eq!(
-            positions[0].prev_opposite_pos,
-            vec![SingleLineSpan {
-                line: 0.into(),
-                start_col: 0,
-                end_col: 0
-            }]
         );
     }
 

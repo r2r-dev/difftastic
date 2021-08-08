@@ -97,7 +97,7 @@ fn first_rhs_context_line(
                     return pos.line;
                 }
             }
-            _ => {},
+            _ => {}
         }
     }
 
