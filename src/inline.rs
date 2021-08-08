@@ -36,18 +36,18 @@ fn last_lhs_context_line(
 
     // If we don't have changes on the LHS, find the line opposite the
     // last RHS unchanged node in this hunk.
+    let mut opposite_unchanged_pos = None;
     for rhs_position in rhs_positions {
         if rhs_position.kind.is_unchanged() {
+            opposite_unchanged_pos = Some(rhs_position.pos.clone());
             continue;
         }
 
-        if let Some(pos) = rhs_position.prev_opposite_pos.first() {
-            if pos.line.0 > lhs_hunk_end.0 {
-                break;
-            }
-
-            if pos.line.0 > lhs_hunk_start.0 {
-                return pos.line;
+        if let Some(opposite_unchanged_pos) = &opposite_unchanged_pos {
+            if let Some(span) = opposite_unchanged_pos.first() {
+                if span.line.0 > lhs_hunk_start.0 {
+                    return span.line;
+                }
             }
         }
     }
@@ -92,16 +92,16 @@ fn first_rhs_context_line(
     lhs_rev_positions.reverse();
     for lhs_position in lhs_rev_positions {
         match lhs_position.kind {
-            MatchKind::Unchanged { .. } => {}
-            _ => break,
-        }
-
-        if let Some(pos) = lhs_position.prev_opposite_pos.first() {
-            last_change_line = Some(pos.line);
+            MatchKind::Unchanged { opposite_pos } => {
+                if let Some(pos) = opposite_pos.first() {
+                    return pos.line;
+                }
+            }
+            _ => {},
         }
     }
 
-    last_change_line.expect("Should have found an opposite LHS line")
+    panic!("Should have found an opposite LHS line")
 }
 
 fn changed_lines(
