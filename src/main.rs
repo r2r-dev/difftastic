@@ -19,8 +19,8 @@ use typed_arena::Arena;
 
 use crate::dijkstra::mark_syntax;
 use crate::files::{is_probably_binary, read_or_die};
-use crate::lines::{join_overlapping, visible_groups, MaxLine};
-use crate::syntax::{change_positions, init_info, matching_lines};
+use crate::lines::{groups_from_lines, pad, MaxLine};
+use crate::syntax::{change_positions, changed_lines, init_info, matching_lines};
 use crate::tree_sitter_parser as tsp;
 
 fn configure_color() {
@@ -235,11 +235,10 @@ fn main() {
     let lhs_positions = change_positions(&lhs_src, &rhs_src, &lhs);
     let rhs_positions = change_positions(&rhs_src, &lhs_src, &rhs);
 
-    let lhs_matched_lines = matching_lines(&lhs);
-
-    let mut groups = visible_groups(&lhs_positions, &rhs_positions);
-    if groups.is_empty() {
-        if lang_name == "text" {
+    let lhs_changed_lines = changed_lines(&lhs_positions);
+    let rhs_changed_lines = changed_lines(&rhs_positions);
+    if lhs_changed_lines.is_empty() && rhs_changed_lines.is_empty() {
+        if &lang_name == "text" {
             println!("No changes.");
         } else {
             println!("No syntactic changes.");
@@ -247,10 +246,17 @@ fn main() {
         return;
     }
 
-    for group in &mut groups {
-        group.pad(3, lhs_src.max_line(), rhs_src.max_line());
-    }
-    groups = join_overlapping(groups);
+    let lhs_padded_lines = pad(&lhs_changed_lines, 3, lhs_src.max_line());
+    let rhs_padded_lines = pad(&rhs_changed_lines, 3, rhs_src.max_line());
+
+    let lhs_matched_lines = matching_lines(&lhs);
+
+    let groups = groups_from_lines(
+        &lhs_padded_lines,
+        &rhs_padded_lines,
+        &lhs_positions,
+        &rhs_positions,
+    );
 
     if env::var("INLINE").is_ok() {
         print!(

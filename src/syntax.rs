@@ -540,9 +540,6 @@ impl MatchKind {
 pub struct MatchedPos {
     pub kind: MatchKind,
     pub pos: Vec<SingleLineSpan>,
-    // TODO: this is confusing: the previous syntax node with a match
-    // may be on the current line or a previous one.
-    pub prev_opposite_pos: Vec<SingleLineSpan>,
 }
 
 fn split_comment_words(
@@ -550,7 +547,6 @@ fn split_comment_words(
     pos: &[SingleLineSpan],
     opposite_content: &str,
     opposite_pos: &[SingleLineSpan],
-    prev_opposite_pos: &[SingleLineSpan],
 ) -> Vec<MatchedPos> {
     // TODO: also split on whitespace, so "// (foo)" splits before "(".
 
@@ -580,7 +576,6 @@ fn split_comment_words(
                         offset,
                         offset + word.len(),
                     ),
-                    prev_opposite_pos: prev_opposite_pos.to_vec(),
                 });
                 offset += word.len();
             }
@@ -599,7 +594,6 @@ fn split_comment_words(
                         opposite_pos: opposite_word_pos,
                     },
                     pos: word_pos,
-                    prev_opposite_pos: prev_opposite_pos.to_vec(),
                 });
                 offset += word.len();
                 opposite_offset += opposite_word.len();
@@ -615,11 +609,7 @@ fn split_comment_words(
 }
 
 impl MatchedPos {
-    fn new(
-        ck: ChangeKind,
-        pos: Vec<SingleLineSpan>,
-        prev_opposite_pos: Vec<SingleLineSpan>,
-    ) -> Vec<Self> {
+    fn new(ck: ChangeKind, pos: Vec<SingleLineSpan>) -> Vec<Self> {
         let kind = match ck {
             ReplacedComment(this, opposite) => {
                 let this_content = match this {
@@ -633,13 +623,7 @@ impl MatchedPos {
                     } => (content, position),
                 };
 
-                return split_comment_words(
-                    this_content,
-                    &pos,
-                    opposite_content,
-                    opposite_pos,
-                    &prev_opposite_pos,
-                );
+                return split_comment_words(this_content, &pos, opposite_content, opposite_pos);
             }
             Unchanged(opposite) => {
                 let opposite_pos = match opposite {
@@ -656,12 +640,30 @@ impl MatchedPos {
             Novel => MatchKind::Novel,
         };
 
-        vec![Self {
-            kind,
-            pos,
-            prev_opposite_pos,
-        }]
+        vec![Self { kind, pos }]
     }
+}
+
+/// Given a sorted slice of MatchedPos, return a vec of the lines that
+/// have changed syntax nodes on them.
+pub fn changed_lines(matched_positions: &[MatchedPos]) -> Vec<LineNumber> {
+    let mut res: Vec<LineNumber> = vec![];
+    for mp in matched_positions {
+        if mp.kind.is_unchanged() {
+            continue;
+        }
+        for pos in &mp.pos {
+            let new_line = match res.last() {
+                Some(prev_line) => prev_line.0 < pos.line.0,
+                _ => true,
+            };
+            if new_line {
+                res.push(pos.line);
+            }
+        }
+    }
+
+    res
 }
 
 /// Walk `nodes` and return a vec of all the changed positions.
@@ -674,18 +676,7 @@ pub fn change_positions<'a>(
     let opposite_nl_pos = NewlinePositions::from(opposite_src);
 
     let mut positions = Vec::new();
-    let mut prev_unchanged = vec![SingleLineSpan {
-        line: 0.into(),
-        start_col: 0,
-        end_col: 0,
-    }];
-    change_positions_(
-        &nl_pos,
-        &opposite_nl_pos,
-        nodes,
-        &mut prev_unchanged,
-        &mut positions,
-    );
+    change_positions_(&nl_pos, &opposite_nl_pos, nodes, &mut positions);
     positions
 }
 
@@ -693,7 +684,6 @@ fn change_positions_<'a>(
     nl_pos: &NewlinePositions,
     opposite_nl_pos: &NewlinePositions,
     nodes: &[&Syntax<'a>],
-    prev_opposite_pos: &mut Vec<SingleLineSpan>,
     positions: &mut Vec<MatchedPos>,
 ) {
     for node in nodes {
@@ -710,73 +700,18 @@ fn change_positions_<'a>(
                     .get()
                     .unwrap_or_else(|| panic!("Should have changes set in all nodes: {:#?}", node));
 
-                if let Unchanged(opposite_node) = change {
-                    match opposite_node {
-                        List {
-                            open_position: opposite_open_pos,
-                            ..
-                        } => {
-                            *prev_opposite_pos = opposite_open_pos.clone();
-                        }
-                        Atom { .. } => unreachable!(),
-                    }
-                }
+                positions.extend(MatchedPos::new(change, open_position.clone()));
 
-                positions.extend(MatchedPos::new(
-                    change,
-                    open_position.clone(),
-                    prev_opposite_pos.clone(),
-                ));
+                change_positions_(nl_pos, opposite_nl_pos, children, positions);
 
-                change_positions_(
-                    nl_pos,
-                    opposite_nl_pos,
-                    children,
-                    prev_opposite_pos,
-                    positions,
-                );
-
-                if let Unchanged(opposite_node) = change {
-                    match opposite_node {
-                        List {
-                            close_position: opposite_close_pos,
-                            ..
-                        } => {
-                            *prev_opposite_pos = opposite_close_pos.clone();
-                        }
-                        Atom { .. } => unreachable!(),
-                    }
-                }
-                positions.extend(MatchedPos::new(
-                    change,
-                    close_position.clone(),
-                    prev_opposite_pos.clone(),
-                ));
+                positions.extend(MatchedPos::new(change, close_position.clone()));
             }
             Atom { info, position, .. } => {
                 let change = info
                     .change
                     .get()
                     .unwrap_or_else(|| panic!("Should have changes set in all nodes: {:#?}", node));
-                if let Unchanged(opposite_node) = change {
-                    match opposite_node {
-                        List { .. } => {
-                            dbg!(node, opposite_node);
-                            unreachable!();
-                        }
-                        Atom {
-                            position: opposite_position,
-                            ..
-                        } => {
-                            *prev_opposite_pos = opposite_position.clone();
-                        }
-                    }
-                }
-                positions.extend(MatchedPos::new(
-                    change,
-                    position.clone(),
-                    prev_opposite_pos.clone(),
-                ));
+                positions.extend(MatchedPos::new(change, position.clone()));
             }
         }
     }
@@ -829,21 +764,6 @@ fn zip_lines(lhs: &[SingleLineSpan], rhs: &[SingleLineSpan]) -> Vec<(LineNumber,
         .collect()
 }
 
-pub fn aligned_lines(
-    group: &LineGroup,
-    lhs_line_matches: &HashMap<LineNumber, LineNumber>,
-) -> Vec<(Option<LineNumber>, Option<LineNumber>)> {
-    let lhs_lines = group.lhs_lines();
-    let rhs_lines = group.rhs_lines();
-
-    // When adding padding to a LineGroup where each side has a
-    // different number of lines, we can end up with extra padding on
-    // the side with fewer lines.
-    //
-    // TODO: fix padding to be smarter.
-    aligned_lines_(&lhs_lines, &rhs_lines, lhs_line_matches)
-}
-
 /// Given two slices of contiguous line numbers, return pairs of
 /// matched lines.
 ///
@@ -852,11 +772,13 @@ pub fn aligned_lines(
 ///
 /// If a line has no match on the other side, the pair will contain
 /// None on the other side.
-fn aligned_lines_(
-    lhs_lines: &[LineNumber],
-    rhs_lines: &[LineNumber],
+pub fn aligned_lines(
+    group: &LineGroup,
     lhs_line_matches: &HashMap<LineNumber, LineNumber>,
 ) -> Vec<(Option<LineNumber>, Option<LineNumber>)> {
+    let lhs_lines = group.lhs_lines();
+    let rhs_lines = group.rhs_lines();
+
     let mut rhs_highest_matched = rhs_lines.first().map_or(0, |l| l.0 as isize) - 1;
 
     // For every LHS line, if there is a RHS line that is included in
@@ -867,7 +789,7 @@ fn aligned_lines_(
     // first line.  See spurious `let` alignment in 9c71298f8294ce8f,
     // LHS line 96 in lines.rs.
     let mut matched_lines = vec![];
-    for lhs_line in lhs_lines {
+    for lhs_line in &lhs_lines {
         if let Some(rhs_line) = lhs_line_matches.get(lhs_line) {
             if rhs_line.0 as isize > rhs_highest_matched {
                 matched_lines.push((lhs_line, rhs_line));
@@ -884,6 +806,9 @@ fn aligned_lines_(
     // Build a vec of matched line tuples. For lines without matches
     // (novel lines, empty lines), just match lines up pairwise. Pad
     // gaps if one side has more lines.
+    //
+    // TODO: what if there isn't a match? See the last LHS line in
+    // comments_after.rs.
     for (lhs_matched_line, rhs_matched_line) in matched_lines {
         let mut lhs_prev_lines = vec![];
         while lhs_i < lhs_lines.len() && lhs_lines[lhs_i] < *lhs_matched_line {
@@ -964,19 +889,29 @@ fn matching_lines_<'a>(node: &Syntax<'a>, matches: &mut HashMap<LineNumber, Line
 
 #[cfg(test)]
 mod tests {
+    use crate::intervals::Interval;
+
     use super::*;
     use pretty_assertions::assert_eq;
 
     #[test]
     fn test_aligned_middle() {
-        let lhs_lines: Vec<LineNumber> = vec![1.into(), 2.into()];
-        let rhs_lines: Vec<LineNumber> = vec![12.into(), 13.into()];
+        let group = LineGroup {
+            lhs_lines: Some(Interval {
+                start: 1.into(),
+                end: 3.into(),
+            }),
+            rhs_lines: Some(Interval {
+                start: 12.into(),
+                end: 14.into(),
+            }),
+        };
 
         let mut line_matches: HashMap<LineNumber, LineNumber> = HashMap::new();
         line_matches.insert(2.into(), 12.into());
 
         assert_eq!(
-            aligned_lines_(&lhs_lines, &rhs_lines, &line_matches),
+            aligned_lines(&group, &line_matches),
             vec![
                 (Some(1.into()), None),
                 (Some(2.into()), Some(12.into())),
@@ -987,15 +922,23 @@ mod tests {
 
     #[test]
     fn test_aligned_all() {
-        let lhs_lines: Vec<LineNumber> = vec![1.into(), 2.into()];
-        let rhs_lines: Vec<LineNumber> = vec![11.into(), 12.into()];
+        let group = LineGroup {
+            lhs_lines: Some(Interval {
+                start: 1.into(),
+                end: 3.into(),
+            }),
+            rhs_lines: Some(Interval {
+                start: 11.into(),
+                end: 13.into(),
+            }),
+        };
 
         let mut line_matches: HashMap<LineNumber, LineNumber> = HashMap::new();
         line_matches.insert(1.into(), 2.into());
         line_matches.insert(2.into(), 12.into());
 
         assert_eq!(
-            aligned_lines_(&lhs_lines, &rhs_lines, &line_matches),
+            aligned_lines(&group, &line_matches),
             vec![
                 (Some(1.into()), Some(11.into())),
                 (Some(2.into()), Some(12.into())),
@@ -1005,43 +948,67 @@ mod tests {
 
     #[test]
     fn test_aligned_none() {
-        let lhs_lines: Vec<LineNumber> = vec![1.into()];
-        let rhs_lines: Vec<LineNumber> = vec![11.into()];
+        let group = LineGroup {
+            lhs_lines: Some(Interval {
+                start: 1.into(),
+                end: 2.into(),
+            }),
+            rhs_lines: Some(Interval {
+                start: 11.into(),
+                end: 12.into(),
+            }),
+        };
 
         let line_matches: HashMap<LineNumber, LineNumber> = HashMap::new();
 
         assert_eq!(
-            aligned_lines_(&lhs_lines, &rhs_lines, &line_matches),
+            aligned_lines(&group, &line_matches),
             vec![(Some(1.into()), Some(11.into()))]
         );
     }
 
     #[test]
     fn test_aligned_line_overlap() {
-        let lhs_lines: Vec<LineNumber> = vec![1.into(), 2.into()];
-        let rhs_lines: Vec<LineNumber> = vec![11.into()];
+        let group = LineGroup {
+            lhs_lines: Some(Interval {
+                start: 1.into(),
+                end: 3.into(),
+            }),
+            rhs_lines: Some(Interval {
+                start: 11.into(),
+                end: 12.into(),
+            }),
+        };
 
         let mut line_matches: HashMap<LineNumber, LineNumber> = HashMap::new();
         line_matches.insert(1.into(), 11.into());
         line_matches.insert(2.into(), 11.into());
 
         assert_eq!(
-            aligned_lines_(&lhs_lines, &rhs_lines, &line_matches),
+            aligned_lines(&group, &line_matches),
             vec![(Some(1.into()), Some(11.into())), (Some(2.into()), None)]
         );
     }
 
     #[test]
     fn test_aligned_out_of_order() {
-        let lhs_lines: Vec<LineNumber> = vec![1.into(), 2.into()];
-        let rhs_lines: Vec<LineNumber> = vec![11.into(), 12.into()];
+        let group = LineGroup {
+            lhs_lines: Some(Interval {
+                start: 1.into(),
+                end: 3.into(),
+            }),
+            rhs_lines: Some(Interval {
+                start: 11.into(),
+                end: 13.into(),
+            }),
+        };
 
         let mut line_matches: HashMap<LineNumber, LineNumber> = HashMap::new();
         line_matches.insert(2.into(), 11.into());
         line_matches.insert(1.into(), 12.into());
 
         assert_eq!(
-            aligned_lines_(&lhs_lines, &rhs_lines, &line_matches),
+            aligned_lines(&group, &line_matches),
             vec![
                 (None, Some(11.into())),
                 (Some(1.into()), Some(12.into())),
@@ -1052,14 +1019,22 @@ mod tests {
 
     #[test]
     fn test_aligned_out_of_range() {
-        let lhs_lines: Vec<LineNumber> = vec![1.into(), 2.into()];
-        let rhs_lines: Vec<LineNumber> = vec![11.into(), 12.into()];
+        let group = LineGroup {
+            lhs_lines: Some(Interval {
+                start: 1.into(),
+                end: 3.into(),
+            }),
+            rhs_lines: Some(Interval {
+                start: 11.into(),
+                end: 13.into(),
+            }),
+        };
 
         let mut line_matches: HashMap<LineNumber, LineNumber> = HashMap::new();
         line_matches.insert(1.into(), 10.into());
 
         assert_eq!(
-            aligned_lines_(&lhs_lines, &rhs_lines, &line_matches),
+            aligned_lines(&group, &line_matches),
             vec![
                 (Some(1.into()), Some(11.into())),
                 (Some(2.into()), Some(12.into())),
@@ -1069,43 +1044,23 @@ mod tests {
 
     #[test]
     fn test_aligned_first_line() {
-        let lhs_lines: Vec<LineNumber> = vec![0.into()];
-        let rhs_lines: Vec<LineNumber> = vec![0.into()];
+        let group = LineGroup {
+            lhs_lines: Some(Interval {
+                start: 0.into(),
+                end: 1.into(),
+            }),
+            rhs_lines: Some(Interval {
+                start: 0.into(),
+                end: 1.into(),
+            }),
+        };
 
         let mut line_matches: HashMap<LineNumber, LineNumber> = HashMap::new();
         line_matches.insert(0.into(), 0.into());
 
         assert_eq!(
-            aligned_lines_(&lhs_lines, &rhs_lines, &line_matches),
+            aligned_lines(&group, &line_matches),
             vec![(Some(0.into()), Some(0.into()))]
-        );
-    }
-
-    /// Ensure that we assign prev_opposite_pos even if the change is on the first node.
-    #[test]
-    fn test_prev_opposite_pos_first_node() {
-        let arena = Arena::new();
-
-        let atom = Syntax::new_atom(
-            &arena,
-            vec![SingleLineSpan {
-                line: 0.into(),
-                start_col: 2,
-                end_col: 3,
-            }],
-            "foo",
-        );
-        atom.set_change(ChangeKind::Novel);
-        let nodes: Vec<&Syntax> = vec![atom];
-
-        let positions = change_positions("irrelevant", "also irrelevant", &nodes);
-        assert_eq!(
-            positions[0].prev_opposite_pos,
-            vec![SingleLineSpan {
-                line: 0.into(),
-                start_col: 0,
-                end_col: 0
-            }]
         );
     }
 

@@ -36,18 +36,18 @@ fn last_lhs_context_line(
 
     // If we don't have changes on the LHS, find the line opposite the
     // last RHS unchanged node in this hunk.
+    let mut opposite_unchanged_pos = None;
     for rhs_position in rhs_positions {
-        if rhs_position.kind.is_unchanged() {
+        if let MatchKind::Unchanged { opposite_pos } = &rhs_position.kind {
+            opposite_unchanged_pos = Some(opposite_pos.1.clone());
             continue;
         }
 
-        if let Some(pos) = rhs_position.prev_opposite_pos.first() {
-            if pos.line.0 > lhs_hunk_end.0 {
-                break;
-            }
-
-            if pos.line.0 > lhs_hunk_start.0 {
-                return pos.line;
+        if let Some(opposite_unchanged_pos) = &opposite_unchanged_pos {
+            if let Some(span) = opposite_unchanged_pos.first() {
+                if span.line.0 > lhs_hunk_start.0 {
+                    return span.line;
+                }
             }
         }
     }
@@ -92,25 +92,28 @@ fn first_rhs_context_line(
     lhs_rev_positions.reverse();
     for lhs_position in lhs_rev_positions {
         match lhs_position.kind {
-            MatchKind::Unchanged { .. } => {}
-            _ => break,
-        }
-
-        if let Some(pos) = lhs_position.prev_opposite_pos.first() {
-            last_change_line = Some(pos.line);
+            MatchKind::Unchanged { opposite_pos } => {
+                if let Some(pos) = opposite_pos.0.first() {
+                    return pos.line;
+                }
+            }
+            _ => {}
         }
     }
 
-    last_change_line.expect("Should have found an opposite LHS line")
+    panic!("Should have found an opposite LHS line")
 }
 
+// TODO: this misses context lines, e.g. when the RHS has fewer novel
+// lines. See comments_after.rs line 8, which should be green.
 fn changed_lines(
     hunk_start: LineNumber,
     hunk_end: LineNumber,
     positions: &[MatchedPos],
 ) -> Vec<LineNumber> {
-    let mut lines_seen = HashSet::new();
-    let mut res = vec![];
+    let mut lines_with_changes = HashSet::new();
+    let mut first_change_line = None;
+    let mut last_change_line = None;
 
     for position in positions {
         if position.kind.is_unchanged() {
@@ -121,15 +124,24 @@ fn changed_lines(
             if pos.line.0 > hunk_end.0 {
                 break;
             }
+
             if pos.line.0 >= hunk_start.0 {
-                if !lines_seen.contains(&pos.line) {
-                    lines_seen.insert(pos.line);
-                    res.push(pos.line);
+                if first_change_line.is_none() {
+                    first_change_line = Some(pos.line);
                 }
+                last_change_line = Some(pos.line);
+                lines_with_changes.insert(pos.line);
             }
         }
     }
 
+    let mut res = vec![];
+    if let (Some(first_change_line), Some(last_change_line)) = (first_change_line, last_change_line)
+    {
+        for num in first_change_line.0..=last_change_line.0 {
+            res.push(LineNumber(num));
+        }
+    }
     res
 }
 
