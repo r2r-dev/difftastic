@@ -14,9 +14,9 @@ use std::{env, fs};
 use typed_arena::Arena;
 
 use crate::dijkstra::mark_syntax;
-use crate::lines::{join_overlapping, visible_groups, MaxLine};
+use crate::lines::{groups_from_lines, pad, MaxLine};
 use crate::parse::{find_lang, parse, parse_lines, ConfigDir};
-use crate::syntax::{change_positions, init_info, matching_lines};
+use crate::syntax::{change_positions, changed_lines, init_info, matching_lines};
 
 fn read_or_die(path: &str) -> Vec<u8> {
     match fs::read(path) {
@@ -124,10 +124,9 @@ fn main() {
     let lhs_positions = change_positions(&lhs_src, &rhs_src, &lhs);
     let rhs_positions = change_positions(&rhs_src, &lhs_src, &rhs);
 
-    let lhs_matched_lines = matching_lines(&lhs);
-
-    let mut groups = visible_groups(&lhs_positions, &rhs_positions);
-    if groups.is_empty() {
+    let lhs_changed_lines = changed_lines(&lhs_positions);
+    let rhs_changed_lines = changed_lines(&rhs_positions);
+    if lhs_changed_lines.is_empty() && rhs_changed_lines.is_empty() {
         if lang.is_some() {
             println!("No syntactic changes.");
         } else {
@@ -136,10 +135,17 @@ fn main() {
         return;
     }
 
-    for group in &mut groups {
-        group.pad(3, lhs_src.max_line(), rhs_src.max_line());
-    }
-    groups = join_overlapping(groups);
+    let lhs_padded_lines = pad(&lhs_changed_lines, 3, lhs_src.max_line());
+    let rhs_padded_lines = pad(&rhs_changed_lines, 3, rhs_src.max_line());
+
+    let lhs_matched_lines = matching_lines(&lhs);
+
+    let groups = groups_from_lines(
+        &lhs_padded_lines,
+        &rhs_padded_lines,
+        &lhs_positions,
+        &rhs_positions,
+    );
 
     if env::var("INLINE").is_ok() {
         print!(

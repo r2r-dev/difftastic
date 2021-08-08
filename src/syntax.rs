@@ -636,10 +636,10 @@ impl MatchedPos {
                 );
             }
             Unchanged(opposite) => {
-                // TODO: is close_position the best position for
+                // TODO: is open_position the best position for
                 // unchanged lists?
                 let opposite_pos = match opposite {
-                    List { close_position, .. } => close_position.clone(),
+                    List { open_position, .. } => open_position.clone(),
                     Atom { position, .. } => position.clone(),
                 };
 
@@ -654,6 +654,28 @@ impl MatchedPos {
             prev_opposite_pos,
         }]
     }
+}
+
+/// Given a sorted slice of MatchedPos, return a vec of the lines that
+/// have changed syntax nodes on them.
+pub fn changed_lines(matched_positions: &[MatchedPos]) -> Vec<LineNumber> {
+    let mut res: Vec<LineNumber> = vec![];
+    for mp in matched_positions {
+        if mp.kind.is_unchanged() {
+            continue;
+        }
+        for pos in &mp.pos {
+            let new_line = match res.last() {
+                Some(prev_line) => prev_line.0 < pos.line.0,
+                _ => true,
+            };
+            if new_line {
+                res.push(pos.line);
+            }
+        }
+    }
+
+    res
 }
 
 /// Walk `nodes` and return a vec of all the changed positions.
