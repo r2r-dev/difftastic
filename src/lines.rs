@@ -102,7 +102,7 @@ impl LineGroup {
         }
 
         if let MatchKind::Unchanged { opposite_pos } = &mp.kind {
-            let first_opposite = opposite_pos.first();
+            let first_opposite = opposite_pos.0.first();
             if let (Some(first_opposite), Some(opposite_group_lines)) =
                 (first_opposite, opposite_group_lines)
             {
@@ -148,8 +148,10 @@ impl LineGroup {
         self.add_lhs_pos(&mp.pos);
 
         match &mp.kind {
-            MatchKind::Unchanged { opposite_pos }
-            | MatchKind::UnchangedCommentPart { opposite_pos } => {
+            MatchKind::Unchanged { opposite_pos } => {
+                self.add_rhs_pos(&opposite_pos.0);
+            }
+            MatchKind::UnchangedCommentPart { opposite_pos } => {
                 self.add_rhs_pos(opposite_pos);
             }
             _ => {}
@@ -159,8 +161,10 @@ impl LineGroup {
         self.add_rhs_pos(&mp.pos);
 
         match &mp.kind {
-            MatchKind::Unchanged { opposite_pos }
-            | MatchKind::UnchangedCommentPart { opposite_pos } => {
+            MatchKind::Unchanged { opposite_pos } => {
+                self.add_lhs_pos(&opposite_pos.0);
+            }
+            MatchKind::UnchangedCommentPart { opposite_pos } => {
                 self.add_lhs_pos(opposite_pos);
             }
             _ => {}

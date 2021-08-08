@@ -93,7 +93,7 @@ fn first_rhs_context_line(
     for lhs_position in lhs_rev_positions {
         match lhs_position.kind {
             MatchKind::Unchanged { opposite_pos } => {
-                if let Some(pos) = opposite_pos.first() {
+                if let Some(pos) = opposite_pos.0.first() {
                     return pos.line;
                 }
             }
