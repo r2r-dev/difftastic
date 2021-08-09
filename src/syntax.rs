@@ -787,7 +787,7 @@ pub fn aligned_lines(
     // first line.  See spurious `let` alignment in 9c71298f8294ce8f,
     // LHS line 96 in lines.rs.
     let mut matched_lines = vec![];
-    for lhs_line in lhs_lines {
+    for lhs_line in &lhs_lines {
         if let Some(rhs_line) = lhs_line_matches.get(lhs_line) {
             if rhs_line.0 as isize > rhs_highest_matched {
                 matched_lines.push((lhs_line, rhs_line));
@@ -884,19 +884,29 @@ fn matching_lines_<'a>(node: &Syntax<'a>, matches: &mut HashMap<LineNumber, Line
 
 #[cfg(test)]
 mod tests {
+    use crate::intervals::Interval;
+
     use super::*;
     use pretty_assertions::assert_eq;
 
     #[test]
     fn test_aligned_middle() {
-        let lhs_lines: Vec<LineNumber> = vec![1.into(), 2.into()];
-        let rhs_lines: Vec<LineNumber> = vec![12.into(), 13.into()];
+        let group = LineGroup {
+            lhs_lines: Some(Interval {
+                start: 1.into(),
+                end: 3.into(),
+            }),
+            rhs_lines: Some(Interval {
+                start: 12.into(),
+                end: 14.into(),
+            }),
+        };
 
         let mut line_matches: HashMap<LineNumber, LineNumber> = HashMap::new();
         line_matches.insert(2.into(), 12.into());
 
         assert_eq!(
-            aligned_lines(&lhs_lines, &rhs_lines, &line_matches),
+            aligned_lines(&group, &line_matches),
             vec![
                 (Some(1.into()), None),
                 (Some(2.into()), Some(12.into())),
@@ -907,15 +917,23 @@ mod tests {
 
     #[test]
     fn test_aligned_all() {
-        let lhs_lines: Vec<LineNumber> = vec![1.into(), 2.into()];
-        let rhs_lines: Vec<LineNumber> = vec![11.into(), 12.into()];
+        let group = LineGroup {
+            lhs_lines: Some(Interval {
+                start: 1.into(),
+                end: 3.into(),
+            }),
+            rhs_lines: Some(Interval {
+                start: 11.into(),
+                end: 13.into(),
+            }),
+        };
 
         let mut line_matches: HashMap<LineNumber, LineNumber> = HashMap::new();
         line_matches.insert(1.into(), 2.into());
         line_matches.insert(2.into(), 12.into());
 
         assert_eq!(
-            aligned_lines(&lhs_lines, &rhs_lines, &line_matches),
+            aligned_lines(&group, &line_matches),
             vec![
                 (Some(1.into()), Some(11.into())),
                 (Some(2.into()), Some(12.into())),
@@ -925,43 +943,67 @@ mod tests {
 
     #[test]
     fn test_aligned_none() {
-        let lhs_lines: Vec<LineNumber> = vec![1.into()];
-        let rhs_lines: Vec<LineNumber> = vec![11.into()];
+        let group = LineGroup {
+            lhs_lines: Some(Interval {
+                start: 1.into(),
+                end: 2.into(),
+            }),
+            rhs_lines: Some(Interval {
+                start: 11.into(),
+                end: 12.into(),
+            }),
+        };
 
         let line_matches: HashMap<LineNumber, LineNumber> = HashMap::new();
 
         assert_eq!(
-            aligned_lines(&lhs_lines, &rhs_lines, &line_matches),
+            aligned_lines(&group, &line_matches),
             vec![(Some(1.into()), Some(11.into()))]
         );
     }
 
     #[test]
     fn test_aligned_line_overlap() {
-        let lhs_lines: Vec<LineNumber> = vec![1.into(), 2.into()];
-        let rhs_lines: Vec<LineNumber> = vec![11.into()];
+        let group = LineGroup {
+            lhs_lines: Some(Interval {
+                start: 1.into(),
+                end: 3.into(),
+            }),
+            rhs_lines: Some(Interval {
+                start: 11.into(),
+                end: 12.into(),
+            }),
+        };
 
         let mut line_matches: HashMap<LineNumber, LineNumber> = HashMap::new();
         line_matches.insert(1.into(), 11.into());
         line_matches.insert(2.into(), 11.into());
 
         assert_eq!(
-            aligned_lines(&lhs_lines, &rhs_lines, &line_matches),
+            aligned_lines(&group, &line_matches),
             vec![(Some(1.into()), Some(11.into())), (Some(2.into()), None)]
         );
     }
 
     #[test]
     fn test_aligned_out_of_order() {
-        let lhs_lines: Vec<LineNumber> = vec![1.into(), 2.into()];
-        let rhs_lines: Vec<LineNumber> = vec![11.into(), 12.into()];
+        let group = LineGroup {
+            lhs_lines: Some(Interval {
+                start: 1.into(),
+                end: 3.into(),
+            }),
+            rhs_lines: Some(Interval {
+                start: 11.into(),
+                end: 13.into(),
+            }),
+        };
 
         let mut line_matches: HashMap<LineNumber, LineNumber> = HashMap::new();
         line_matches.insert(2.into(), 11.into());
         line_matches.insert(1.into(), 12.into());
 
         assert_eq!(
-            aligned_lines(&lhs_lines, &rhs_lines, &line_matches),
+            aligned_lines(&group, &line_matches),
             vec![
                 (None, Some(11.into())),
                 (Some(1.into()), Some(12.into())),
@@ -972,14 +1014,22 @@ mod tests {
 
     #[test]
     fn test_aligned_out_of_range() {
-        let lhs_lines: Vec<LineNumber> = vec![1.into(), 2.into()];
-        let rhs_lines: Vec<LineNumber> = vec![11.into(), 12.into()];
+        let group = LineGroup {
+            lhs_lines: Some(Interval {
+                start: 1.into(),
+                end: 3.into(),
+            }),
+            rhs_lines: Some(Interval {
+                start: 11.into(),
+                end: 13.into(),
+            }),
+        };
 
         let mut line_matches: HashMap<LineNumber, LineNumber> = HashMap::new();
         line_matches.insert(1.into(), 10.into());
 
         assert_eq!(
-            aligned_lines(&lhs_lines, &rhs_lines, &line_matches),
+            aligned_lines(&group, &line_matches),
             vec![
                 (Some(1.into()), Some(11.into())),
                 (Some(2.into()), Some(12.into())),
@@ -989,14 +1039,22 @@ mod tests {
 
     #[test]
     fn test_aligned_first_line() {
-        let lhs_lines: Vec<LineNumber> = vec![0.into()];
-        let rhs_lines: Vec<LineNumber> = vec![0.into()];
+        let group = LineGroup {
+            lhs_lines: Some(Interval {
+                start: 0.into(),
+                end: 1.into(),
+            }),
+            rhs_lines: Some(Interval {
+                start: 0.into(),
+                end: 1.into(),
+            }),
+        };
 
         let mut line_matches: HashMap<LineNumber, LineNumber> = HashMap::new();
         line_matches.insert(0.into(), 0.into());
 
         assert_eq!(
-            aligned_lines(&lhs_lines, &rhs_lines, &line_matches),
+            aligned_lines(&group, &line_matches),
             vec![(Some(0.into()), Some(0.into()))]
         );
     }
