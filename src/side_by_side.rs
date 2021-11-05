@@ -9,7 +9,7 @@ use crate::{
     hunks::{aligned_lines_from_hunk, extract_lines, Hunk},
     lines::{enforce_exact_length, enforce_max_length, format_line_num, LineNumber, MaxLine},
     style::{self, apply_colors},
-    syntax::MatchedPos,
+    syntax::{zip_pad_shorter, MatchedPos},
 };
 
 const SPACER: &str = "  ";
@@ -174,6 +174,23 @@ fn column_widths(
     (lhs_column_width, rhs_column_width)
 }
 
+/// "fooba", 3 -> vec!["foo", "ba"]
+fn split_string(s: &str, max_len: usize) -> Vec<String> {
+    let mut res = vec![];
+    let mut s = s;
+
+    while s.len() > max_len {
+        res.push(s[..max_len].into());
+        s = &s[max_len..];
+    }
+
+    if res.is_empty() || s != "" {
+        res.push(s.into());
+    }
+
+    res
+}
+
 pub fn display_hunks(
     hunks: &[Hunk],
     display_path: &str,
@@ -202,9 +219,9 @@ pub fn display_hunks(
         terminal_width - lhs_column_width - lhs_content_width - SPACER.len() - rhs_column_width;
 
     let lhs_src = enforce_exact_length(lhs_src, lhs_content_width);
-    let rhs_src = enforce_max_length(rhs_src, rhs_content_width);
-    let lhs_colored = apply_colors(&lhs_src, true, lhs_mps);
-    let rhs_colored = apply_colors(&rhs_src, false, rhs_mps);
+    // let rhs_src = enforce_max_length(rhs_src, rhs_content_width);
+    let lhs_colored = &lhs_src;
+    let rhs_colored = &rhs_src;
 
     let lhs_colored_lines = split_lines_nonempty(&lhs_colored);
     let rhs_colored_lines = split_lines_nonempty(&rhs_colored);
@@ -240,12 +257,16 @@ pub fn display_hunks(
 
         for (lhs_line_num, rhs_line_num) in aligned_lines {
             let lhs_line = match lhs_line_num {
-                Some(lhs_line_num) => lhs_colored_lines[lhs_line_num.0].clone(),
-                None => " ".repeat(lhs_content_width),
+                Some(lhs_line_num) => {
+                    split_string(&lhs_colored_lines[lhs_line_num.0], lhs_content_width)
+                }
+                None => vec![" ".repeat(lhs_content_width)],
             };
             let rhs_line = match rhs_line_num {
-                Some(rhs_line_num) => &rhs_colored_lines[rhs_line_num.0],
-                None => "",
+                Some(rhs_line_num) => {
+                    split_string(&rhs_colored_lines[rhs_line_num.0], rhs_content_width)
+                }
+                None => vec!["".into()],
             };
 
             let display_lhs_line_num: String = match lhs_line_num {
@@ -277,10 +298,46 @@ pub fn display_hunks(
                 ),
             };
 
-            out_lines.push(format!(
-                "{}{}{}{}{}",
-                display_lhs_line_num, lhs_line, SPACER, display_rhs_line_num, rhs_line
-            ));
+            for (i, (lhs_line, rhs_line)) in zip_pad_shorter(&lhs_line, &rhs_line)
+                .into_iter()
+                .enumerate()
+            {
+                let lhs_line = lhs_line.unwrap_or(" ".repeat(lhs_content_width));
+                let rhs_line = rhs_line.unwrap_or("".into());
+                let lhs_num: String = if i == 0 {
+                    display_lhs_line_num.clone()
+                } else {
+                    let s: String = format_missing_line_num(lhs_line_num.unwrap_or(10.into()), lhs_column_width);
+                    if let Some(line_num) = lhs_line_num {
+                        if lhs_lines_with_novel.contains(&line_num) {
+                            s.bright_red().to_string()
+                        } else {
+                            s
+                        }
+                    } else {
+                        s
+                    }
+                };
+                let rhs_num: String = if i == 0 {
+                    display_rhs_line_num.clone()
+                } else {
+                    let s: String = format_missing_line_num(rhs_line_num.unwrap_or(10.into()), rhs_column_width);
+                    if let Some(line_num) = rhs_line_num {
+                        if rhs_lines_with_novel.contains(&line_num) {
+                            s.bright_green().to_string()
+                        } else {
+                            s
+                        }
+                    } else {
+                        s
+                    }
+                };
+
+                out_lines.push(format!(
+                    "{}{}{}{}{}",
+                    lhs_num, lhs_line, SPACER, rhs_num, rhs_line
+                ));
+            }
 
             if lhs_line_num.is_some() {
                 prev_lhs_line_num = lhs_line_num;
