@@ -148,18 +148,15 @@ pub fn substring_by_codepoint(s: &str, start: usize, end: usize) -> &str {
     }
 }
 
-pub fn enforce_min_length(s: &str, line_length: usize) -> String {
-    let mut result = String::with_capacity(s.len());
-    for line in s.lines() {
-        if codepoint_len(line) > line_length {
-            result.push_str(line);
-        } else {
-            // Pad with spaces.
-            result.push_str(&format!("{:width$}", line, width = line_length));
-        }
+/// Given a single line string, pad it with spaces if it's shorter
+/// than `length`.
+pub fn enforce_min_length(s: &str, length: usize) -> String {
+    if codepoint_len(s) > length {
+        s.into()
+    } else {
+        // Pad with spaces.
+        format!("{:width$}", s, width = length)
     }
-
-    result
 }
 
 /// Truncate any lines in `s` that are longer than `line_length`.
