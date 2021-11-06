@@ -307,7 +307,10 @@ pub fn display_hunks(
                 let lhs_num: String = if i == 0 {
                     display_lhs_line_num.clone()
                 } else {
-                    let s: String = format_missing_line_num(lhs_line_num.unwrap_or(10.into()), lhs_column_width);
+                    let s: String = format_missing_line_num(
+                        lhs_line_num.unwrap_or(prev_lhs_line_num.unwrap_or(10.into())),
+                        lhs_column_width,
+                    );
                     if let Some(line_num) = lhs_line_num {
                         if lhs_lines_with_novel.contains(&line_num) {
                             s.bright_red().to_string()
@@ -321,7 +324,10 @@ pub fn display_hunks(
                 let rhs_num: String = if i == 0 {
                     display_rhs_line_num.clone()
                 } else {
-                    let s: String = format_missing_line_num(rhs_line_num.unwrap_or(10.into()), rhs_column_width);
+                    let s: String = format_missing_line_num(
+                        rhs_line_num.unwrap_or(prev_rhs_line_num.unwrap_or(10.into())),
+                        rhs_column_width,
+                    );
                     if let Some(line_num) = rhs_line_num {
                         if rhs_lines_with_novel.contains(&line_num) {
                             s.bright_green().to_string()
