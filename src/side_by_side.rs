@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use crate::{
     context::{add_context, opposite_positions},
     hunks::{aligned_lines_from_hunk, extract_lines, Hunk},
-    lines::{enforce_exact_length, enforce_max_length, format_line_num, LineNumber, MaxLine},
+    lines::{enforce_max_length, enforce_min_length, format_line_num, LineNumber, MaxLine},
     style::{self, apply_colors},
     syntax::{zip_pad_shorter, MatchedPos},
 };
@@ -218,8 +218,6 @@ pub fn display_hunks(
     let rhs_content_width =
         terminal_width - lhs_column_width - lhs_content_width - SPACER.len() - rhs_column_width;
 
-    let lhs_src = enforce_exact_length(lhs_src, lhs_content_width);
-    // let rhs_src = enforce_max_length(rhs_src, rhs_content_width);
     let lhs_colored = &lhs_src;
     let rhs_colored = &rhs_src;
 
@@ -302,7 +300,8 @@ pub fn display_hunks(
                 .into_iter()
                 .enumerate()
             {
-                let lhs_line = lhs_line.unwrap_or(" ".repeat(lhs_content_width));
+                let lhs_line =
+                    enforce_min_length(&lhs_line.unwrap_or(" ".into()), lhs_content_width);
                 let rhs_line = rhs_line.unwrap_or("".into());
                 let lhs_num: String = if i == 0 {
                     display_lhs_line_num.clone()
