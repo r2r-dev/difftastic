@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     context::{add_context, opposite_positions},
     hunks::{aligned_lines_from_hunk, extract_lines, Hunk},
-    lines::{enforce_max_length, enforce_min_length, format_line_num, LineNumber, MaxLine},
+    lines::{enforce_max_length, format_line_num, LineNumber, MaxLine},
     positions::SingleLineSpan,
     style::{self, color_positions, split_and_apply, Style},
     syntax::{zip_pad_shorter, MatchedPos},
@@ -299,8 +299,7 @@ pub fn display_hunks(
                 .into_iter()
                 .enumerate()
             {
-                let lhs_line =
-                    enforce_min_length(&lhs_line.unwrap_or(" ".into()), lhs_content_width);
+                let lhs_line = lhs_line.unwrap_or(" ".repeat(lhs_content_width));
                 let rhs_line = rhs_line.unwrap_or("".into());
                 let lhs_num: String = if i == 0 {
                     display_lhs_line_num.clone()

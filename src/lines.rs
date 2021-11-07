@@ -148,17 +148,6 @@ pub fn substring_by_codepoint(s: &str, start: usize, end: usize) -> &str {
     }
 }
 
-/// Given a single line string, pad it with spaces if it's shorter
-/// than `length`.
-pub fn enforce_min_length(s: &str, length: usize) -> String {
-    if codepoint_len(s) > length {
-        s.into()
-    } else {
-        // Pad with spaces.
-        format!("{:width$}", s, width = length)
-    }
-}
-
 /// Truncate any lines in `s` that are longer than `line_length`.
 pub fn enforce_max_length(s: &str, line_length: usize) -> String {
     let mut result = String::with_capacity(s.len());
