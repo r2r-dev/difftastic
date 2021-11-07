@@ -218,11 +218,8 @@ pub fn display_hunks(
     let rhs_content_width =
         terminal_width - lhs_column_width - lhs_content_width - SPACER.len() - rhs_column_width;
 
-    let lhs_colored = &lhs_src;
-    let rhs_colored = &rhs_src;
-
-    let lhs_colored_lines = split_lines_nonempty(&lhs_colored);
-    let rhs_colored_lines = split_lines_nonempty(&rhs_colored);
+    let lhs_lines = split_lines_nonempty(lhs_src);
+    let rhs_lines = split_lines_nonempty(rhs_src);
 
     let lhs_lines_with_novel: HashSet<LineNumber> = lhs_mps
         .iter()
@@ -255,15 +252,11 @@ pub fn display_hunks(
 
         for (lhs_line_num, rhs_line_num) in aligned_lines {
             let lhs_line = match lhs_line_num {
-                Some(lhs_line_num) => {
-                    split_string(&lhs_colored_lines[lhs_line_num.0], lhs_content_width)
-                }
+                Some(lhs_line_num) => split_string(&lhs_lines[lhs_line_num.0], lhs_content_width),
                 None => vec![" ".repeat(lhs_content_width)],
             };
             let rhs_line = match rhs_line_num {
-                Some(rhs_line_num) => {
-                    split_string(&rhs_colored_lines[rhs_line_num.0], rhs_content_width)
-                }
+                Some(rhs_line_num) => split_string(&rhs_lines[rhs_line_num.0], rhs_content_width),
                 None => vec!["".into()],
             };
 
