@@ -248,13 +248,11 @@ pub fn display_hunks(
 
         for (lhs_line_num, rhs_line_num) in aligned_lines {
             let lhs_line = match lhs_line_num {
-                Some(lhs_line_num) => {
-                    split_and_apply(
-                        &lhs_lines[lhs_line_num.0],
-                        lhs_content_width,
-                        &lhs_styles.get(&lhs_line_num).unwrap_or(&vec![]),
-                    )
-                }
+                Some(lhs_line_num) => split_and_apply(
+                    &lhs_lines[lhs_line_num.0],
+                    lhs_content_width,
+                    &lhs_styles.get(&lhs_line_num).unwrap_or(&vec![]),
+                ),
                 None => vec![" ".repeat(lhs_content_width)],
             };
             let rhs_line = match rhs_line_num {
