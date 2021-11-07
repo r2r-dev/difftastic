@@ -2,13 +2,14 @@
 
 use atty::Stream;
 use colored::{Color, Colorize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
     context::{add_context, opposite_positions},
     hunks::{aligned_lines_from_hunk, extract_lines, Hunk},
     lines::{enforce_max_length, enforce_min_length, format_line_num, LineNumber, MaxLine},
-    style::{self, apply_colors},
+    positions::SingleLineSpan,
+    style::{self, color_positions, split_and_apply, Style},
     syntax::{zip_pad_shorter, MatchedPos},
 };
 
@@ -174,23 +175,6 @@ fn column_widths(
     (lhs_column_width, rhs_column_width)
 }
 
-/// "fooba", 3 -> vec!["foo", "ba"]
-fn split_string(s: &str, max_len: usize) -> Vec<String> {
-    let mut res = vec![];
-    let mut s = s;
-
-    while s.len() > max_len {
-        res.push(s[..max_len].into());
-        s = &s[max_len..];
-    }
-
-    if res.is_empty() || s != "" {
-        res.push(s.into());
-    }
-
-    res
-}
-
 pub fn display_hunks(
     hunks: &[Hunk],
     display_path: &str,
@@ -205,6 +189,18 @@ pub fn display_hunks(
     }
     if rhs_src == "" {
         return display_single_column(lhs_src, Color::BrightRed);
+    }
+
+    let mut lhs_styles: HashMap<LineNumber, Vec<(SingleLineSpan, Style)>> = HashMap::new();
+    for (span, style) in color_positions(true, lhs_mps) {
+        let styles = lhs_styles.entry(span.line).or_insert_with(Vec::new);
+        styles.push((span, style));
+    }
+
+    let mut rhs_styles: HashMap<LineNumber, Vec<(SingleLineSpan, Style)>> = HashMap::new();
+    for (span, style) in color_positions(false, rhs_mps) {
+        let styles = rhs_styles.entry(span.line).or_insert_with(Vec::new);
+        styles.push((span, style));
     }
 
     let terminal_width = term_width().unwrap_or(80);
@@ -252,11 +248,21 @@ pub fn display_hunks(
 
         for (lhs_line_num, rhs_line_num) in aligned_lines {
             let lhs_line = match lhs_line_num {
-                Some(lhs_line_num) => split_string(&lhs_lines[lhs_line_num.0], lhs_content_width),
+                Some(lhs_line_num) => {
+                    split_and_apply(
+                        &lhs_lines[lhs_line_num.0],
+                        lhs_content_width,
+                        &lhs_styles.get(&lhs_line_num).unwrap_or(&vec![]),
+                    )
+                }
                 None => vec![" ".repeat(lhs_content_width)],
             };
             let rhs_line = match rhs_line_num {
-                Some(rhs_line_num) => split_string(&rhs_lines[rhs_line_num.0], rhs_content_width),
+                Some(rhs_line_num) => split_and_apply(
+                    &rhs_lines[rhs_line_num.0],
+                    rhs_content_width,
+                    &rhs_styles.get(&rhs_line_num).unwrap_or(&vec![]),
+                ),
                 None => vec!["".into()],
             };
 
