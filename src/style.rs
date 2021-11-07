@@ -6,7 +6,10 @@ use crate::{
     syntax::{AtomKind, MatchKind, MatchedPos, TokenKind},
 };
 use colored::*;
-use std::{cmp::min, collections::HashMap};
+use std::{
+    cmp::{max, min},
+    collections::HashMap,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Style {
@@ -86,11 +89,13 @@ pub fn split_and_apply(
                         .dimmed(),
                     );
                 }
+            }
 
-                // Apply style to the substring in this span.
+            // Apply style to the substring in this span.
+            if span.end_col > prev_length {
                 let span_s = substring_by_codepoint(
                     &part,
-                    span.start_col - prev_length,
+                    max(0, span.start_col as isize - prev_length as isize) as usize,
                     min(codepoint_len(&part), span.end_col - prev_length),
                 );
                 res.push_str(&style.apply(span_s));
