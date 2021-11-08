@@ -345,7 +345,7 @@ pub fn display_hunks(
                     .into_iter()
                     .enumerate()
                 {
-                    let lhs_line = lhs_line.unwrap_or(" ".repeat(widths.rhs_content));
+                    let lhs_line = lhs_line.unwrap_or(" ".repeat(widths.lhs_content));
                     let rhs_line = rhs_line.unwrap_or("".into());
                     let lhs_num: String = if i == 0 {
                         display_lhs_line_num.clone()
